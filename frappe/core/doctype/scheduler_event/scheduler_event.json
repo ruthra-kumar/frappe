@@ -12,8 +12,10 @@
   {
    "fieldname": "scheduled_against",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Scheduled Against",
-   "options": "DocType"
+   "options": "DocType",
+   "reqd": 1
   },
   {
    "fieldname": "method",
@@ -24,7 +26,7 @@
  "in_create": 1,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-01-13 10:36:52.332434",
+ "modified": "2025-01-13 12:21:07.567787",
  "modified_by": "Administrator",
  "module": "Core",
  "name": "Scheduler Event",
