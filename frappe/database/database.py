@@ -13,6 +13,7 @@ from contextlib import contextmanager, suppress
 from time import time
 from typing import TYPE_CHECKING, Any, Literal
 
+import click
 from pypika.queries import QueryBuilder, Table
 
 import frappe
@@ -1174,6 +1175,7 @@ class Database:
 
 	def commit(self, *, chain=False):
 		"""Commit current transaction. Calls SQL `COMMIT`."""
+		click.echo("From click: Commit hit")
 		if self._disable_transaction_control:
 			warnings.warn(message=TRANSACTION_DISABLED_MSG, stacklevel=2)
 			return
