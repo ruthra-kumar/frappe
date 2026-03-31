@@ -141,6 +141,10 @@ class ParallelTestRunner:
 		signal.alarm(60)
 		faulthandler.register(signal.SIGALRM)
 
+		self.test_result.slow_tests.sort(key=lambda x: x[1], reverse=True)
+		[click.echo(f"({x[0]}, {x[1]:.03}s)") for x in self.test_result.slow_tests]
+		click.echo(f"Total elapsed above threshold: {sum([x[1] for x in self.test_result.slow_tests])}s")
+
 		self.test_result.printErrors()
 		click.echo(self.test_result)
 		if self.test_result.failures or self.test_result.errors:

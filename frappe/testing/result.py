@@ -34,6 +34,7 @@ class TestResult(unittest.TextTestResult):
 		self.failfast = failfast
 		self._old_stdout = []
 		self._old_stderr = []
+		self.slow_tests = []
 
 	def _setupStdout(self):
 		pass
@@ -123,6 +124,9 @@ class TestResult(unittest.TextTestResult):
 		super(unittest.TextTestResult, self).addSuccess(test)
 		elapsed = time.monotonic() - self._started_at
 		threshold_passed = elapsed >= SLOW_TEST_THRESHOLD
+		if threshold_passed:
+			self.slow_tests.append((self.getTestMethodName(test), elapsed))
+
 		long_elapsed = click.style(f" ({elapsed:.03}s)", fg="red") if threshold_passed else ""
 		self._write_result(test, " ✔ ", "green", long_elapsed)
 		logger.debug(f"{test!s:<200} {'[success]':>20} ⌛{elapsed}")
@@ -183,6 +187,7 @@ SLOW_TEST_THRESHOLD = 2
 
 class FrappeTestResult(unittest.TextTestResult):
 	def __init__(self, stream, descriptions, verbosity):
+		self.slow_tests = []
 		super().__init__(stream, descriptions, verbosity)
 
 	def startTest(self, test):
@@ -201,6 +206,8 @@ class FrappeTestResult(unittest.TextTestResult):
 		super(unittest.TextTestResult, self).addSuccess(test)
 		elapsed = time.monotonic() - self._started_at
 		threshold_passed = elapsed >= SLOW_TEST_THRESHOLD
+		if threshold_passed:
+			self.slow_tests.append((self.getTestMethodName(test), elapsed))
 		elapsed = click.style(f" ({elapsed:.03}s)", fg="red") if threshold_passed else ""
 		click.echo(f"  {click.style(' ✔ ', fg='green')} {self.getTestMethodName(test)}{elapsed}")
 
@@ -223,3 +230,8 @@ class FrappeTestResult(unittest.TextTestResult):
 	def addUnexpectedSuccess(self, test):
 		super(unittest.TextTestResult, self).addUnexpectedSuccess(test)
 		click.echo(f"  {click.style(' ✔ ', fg='green')} {self.getTestMethodName(test)}")
+
+	def stopTestRun(self):
+		self.slow_tests.sort(key=lambda x: x[1], reverse=True)
+		[click.echo(f"({x[0]}, {x[1]:.03}s)") for x in self.slow_tests]
+		click.echo(f"Total elapsed above threshold: {sum([x[1] for x in self.slow_tests]):.03}s")
