@@ -162,9 +162,13 @@ class ParallelTestRunner:
 		test_weight = TEST_WEIGHT_OVERRIDES.get(test[-1]) or 1
 
 		with open(file_name) as f:
-			test_count = f.read().count("def test_") * test_weight
+			# Ensure for atleast one test case
+			content = f.read()
+			if content.count("def test_"):
+				test_count = len(content.splitlines()) * test_weight
+				return test_count
 
-		return test_count
+		return 0
 
 
 def split_by_weight(work, weights, chunk_count):
