@@ -487,6 +487,8 @@ class Database:
 					raise frappe.TooManyWritesError(msg)
 
 	def check_implicit_commit(self, query: str, query_type: str):
+		if "drop" in query:
+			print("Query:", query)
 		if query_type in IMPLICIT_COMMIT_QUERY_TYPES and self.transaction_writes:
 			raise ImplicitCommitError("This statement can cause implicit commit", query)
 
