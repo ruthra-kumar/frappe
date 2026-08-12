@@ -1,6 +1,7 @@
+from duckdb import DuckDBPyRelation
+
 import frappe
 from frappe import qb
-from frappe.database import get_duckdb
 from frappe.database.database import Database
 from frappe.database.duckdb.schema import DuckDBTable
 
@@ -94,7 +95,7 @@ def get_latest_sync(doctype: str | None = None):
 	return None
 
 
-class DuckDBConnection:
+class DuckDBDatabase:
 	"""Wraps a DuckDB connection so fetch results automatically convert Decimal to float."""
 
 	def __init__(self, conn):
@@ -107,8 +108,21 @@ class DuckDBConnection:
 		rel = self._conn.execute(query, parameters) if parameters is not None else self._conn.execute(query)
 		return DuckDBRelation(rel)
 
-	def sql(self, query):
-		return DuckDBRelation(self._conn.sql(query))
+	def sql(self, query, as_dict=False, pluck=None):
+		relation = self._conn.sql(query)
+		result = ()
+		if isinstance(relation, DuckDBPyRelation):
+			partial = DuckDBRelation(relation).fetchall()
+			if pluck:
+				result = [x[0] for x in partial]
+
+			if as_dict:
+				columns = relation.columns[0] if pluck else relation.columns
+				result = [dict(zip(columns, row, strict=False)) for row in partial]
+			else:
+				result = partial
+
+		return result
 
 
 class DuckDBRelation:

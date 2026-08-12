@@ -66,7 +66,7 @@ class DuckDBColumn(DbColumn):
 
 class DuckDBTable(DBTable):
 	def is_new(self, conn):
-		tables = [x[0] for x in conn.sql("show tables").fetchall()]
+		tables = [x[0] for x in conn.sql("show tables")]
 		return self.table_name not in tables
 
 	def sync(self, conn):

@@ -155,6 +155,7 @@ if TYPE_CHECKING:  # pragma: no cover
 	from frappe.concurrency_limiter import concurrent_limit
 	from frappe.config import get_common_site_config, get_conf, get_site_config
 	from frappe.core.doctype.system_settings.system_settings import get_system_settings
+	from frappe.database.duckdb.database import DuckDBDatabase
 	from frappe.database.mariadb.database import MariaDBDatabase as PyMariaDBDatabase
 	from frappe.database.mariadb.mysqlclient import MariaDBDatabase
 	from frappe.database.postgres.database import PostgresDatabase
@@ -243,6 +244,7 @@ type FlagsDict = _dict[str, Any]  # type: ignore[no-any-explicit]
 type FormDict = _dict[str, str]
 
 db: LocalProxy["PyMariaDBDatabase" | "MariaDBDatabase" | "PostgresDatabase" | "SQLiteDatabase"] = local("db")
+ducklake: LocalProxy["DuckDBDatabase"] = local("ducklake")
 qb: LocalProxy["MariaDB" | "Postgres" | "SQLite"] = local("qb")
 conf: LocalProxy[ConfType] = local("conf")
 form_dict: LocalProxy[FormDict] = local("form_dict")
@@ -376,7 +378,7 @@ def connect(site: str | None = None, db_name: str | None = None, set_admin_as_us
 	:param db_name: (Deprecated) Optional. Will use from `site_config.json`.
 	:param set_admin_as_user: Set Administrator as current user.
 	"""
-	from frappe.database import get_db
+	from frappe.database import get_db, get_ducklake
 
 	if site:
 		from frappe.deprecation_dumpster import deprecation_warning
@@ -418,6 +420,8 @@ def connect(site: str | None = None, db_name: str | None = None, set_admin_as_us
 		password=db_password,
 		cur_db_name=db_name_,
 	)
+
+	local.ducklake = get_ducklake()
 
 	if set_admin_as_user:
 		set_user("Administrator")

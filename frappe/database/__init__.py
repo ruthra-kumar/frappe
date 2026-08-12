@@ -90,20 +90,40 @@ def get_db(socket=None, host=None, user=None, password=None, port=None, cur_db_n
 		)
 
 
-def get_duckdb(read_only=True, filename=None):
+def get_ducklake():
 	import os
 
 	import duckdb
 
 	import frappe
-	from frappe.database.duckdb.database import DuckDBConnection
+	from frappe.database.duckdb.database import DuckDBDatabase
 
-	if not filename:
-		return
+	db_path = os.path.realpath(frappe.utils.get_files_path(is_private=True))
+	db_name = frappe.conf.db_name + "_lakehouse"
 
-	db_home = os.path.realpath(frappe.utils.get_files_path(is_private=True))
-	db_with_abs_path = os.path.join(db_home, filename)
-	return DuckDBConnection(duckdb.connect(f"{db_with_abs_path}", read_only=read_only))
+	ducklake = DuckDBDatabase(duckdb.connect())
+	installed = ducklake.sql("select extension_name from duckdb_extensions() where installed = true;")
+	if installed:
+		installed = [x[0] for x in installed]
+	for x in ["ducklake", "sqlite"]:
+		if x not in installed:
+			ducklake.install_extension(x)
+
+	loaded = ducklake.sql("select extension_name from duckdb_extensions() where loaded = true;")
+	if loaded:
+		loaded = [x[0] for x in loaded]
+
+	for x in ["ducklake", "sqlite"]:
+		if x not in loaded:
+			ducklake.load_extension(x)
+
+	dbs = ducklake.sql("show databases;")
+	if db_name not in dbs:
+		ducklake.sql(
+			f"attach 'ducklake:sqlite:{db_path}/{db_name}_catalog.sqlite' as {db_name} (data_path '{db_path}/{db_name}_files/');"
+		)
+	ducklake.sql(f"use {db_name};")
+	return ducklake
 
 
 def delete_duckdb_file(filename=None):
