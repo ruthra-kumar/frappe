@@ -155,6 +155,7 @@ if TYPE_CHECKING:  # pragma: no cover
 	from frappe.concurrency_limiter import concurrent_limit
 	from frappe.config import get_common_site_config, get_conf, get_site_config
 	from frappe.core.doctype.system_settings.system_settings import get_system_settings
+	from frappe.database.duckdb.database import DuckDBDatabase
 	from frappe.database.mariadb.database import MariaDBDatabase as PyMariaDBDatabase
 	from frappe.database.mariadb.mysqlclient import MariaDBDatabase
 	from frappe.database.postgres.database import PostgresDatabase
