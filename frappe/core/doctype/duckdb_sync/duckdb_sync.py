@@ -5,7 +5,7 @@ from datetime import time, timedelta
 
 import frappe
 from frappe import qb
-from frappe.database import get_duckdb
+from frappe.database import get_ducklake
 from frappe.database.duckdb.schema import DuckDBTable
 from frappe.model.document import Document
 
@@ -25,15 +25,11 @@ class DuckDBSync(Document):
 		amended_from: DF.Link | None
 		db_tables: DF.Table[DuckDBSyncItem]
 		doc_type: DF.Link
-		filename: DF.Data | None
 	# end: auto-generated types
 
 	_DOCTYPE_NAME = "DuckDB Sync"
 
 	def before_save(self):
-		dt = self.doc_type.lower().replace(" ", "_")
-		self.filename = f"{dt}_{self.name}.duckdb"
-
 		self.db_tables = []
 		self.append("db_tables", {"table": self.doc_type})
 		df = qb.DocType("DocField")
@@ -51,11 +47,11 @@ class DuckDBSync(Document):
 		start_data_sync(self.name)
 
 	def get_duckdb_conn(self):
-		return get_duckdb(False, self.filename)
+		return get_ducklake()
 
 	def sync_schema(self):
 		duck_conn = self.get_duckdb_conn()
-		existing = set([x[0] for x in duck_conn.sql("show tables").fetchall()])
+		existing = set([x[0] for x in duck_conn.sql("show tables")])
 
 		for x in self.db_tables:
 			ddbt = DuckDBTable(x.table)
@@ -67,10 +63,14 @@ class DuckDBSync(Document):
 		self.flags.ignore_links = True
 
 	def on_trash(self):
-		if self.docstatus.is_cancelled():
-			from frappe.database import delete_duckdb_file
+		duck_conn = self.get_duckdb_conn()
+		existing = set([x[0] for x in duck_conn.sql("show tables")])
 
-			delete_duckdb_file(self.filename)
+		for x in self.db_tables:
+			ddbt = DuckDBTable(x.table)
+			if ddbt.table_name in existing:
+				duck_conn.sql(f'drop table "{ddbt.table_name}";')
+		duck_conn.close()
 
 	@staticmethod
 	def clear_old_logs(days=45):
@@ -208,6 +208,7 @@ def sync_using_extension(conn, dt, duck_tb):
 	try:
 		conn.execute(f'delete from "{duck_tb.table_name}";').fetchall()
 		conn.sql(get_attach_query())
+
 		columns = frappe.get_meta(dt).get_valid_columns()
 		# quotted fields
 		columns_sql = ", ".join([f'"{x}"' for x in columns])
