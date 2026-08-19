@@ -112,12 +112,14 @@ class DuckDBDatabase:
 		relation = self._conn.sql(query)
 		result = ()
 		if isinstance(relation, DuckDBPyRelation):
+			columns = relation.columns
 			partial = DuckDBRelation(relation).fetchall()
-			if pluck:
-				result = [x[0] for x in partial]
+
+			if pluck and not as_dict:
+				columns = [relation.columns[0]]
+				partial = [(x[0]) for x in partial]
 
 			if as_dict:
-				columns = relation.columns[0] if pluck else relation.columns
 				result = [dict(zip(columns, row, strict=False)) for row in partial]
 			else:
 				result = partial
