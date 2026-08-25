@@ -19,6 +19,7 @@ dependencies = [
     "PyJWT~=2.13.0",
     "duckdb~=1.5.2",
     "pyarrow~=25.0.0",
+    "mysql-replication~=1.0.17",
     # We depend on internal attributes,
     # do NOT add loose requirements on PyMySQL versions.
     "PyMySQL==1.1.2",
