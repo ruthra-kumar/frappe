@@ -120,7 +120,7 @@ def get_ducklake():
 	dbs = ducklake.sql("show databases;")
 	if db_name not in dbs:
 		ducklake.sql(
-			f"attach 'ducklake:sqlite:{db_path}/{db_name}_catalog.sqlite' as {db_name} (data_path '{db_path}/{db_name}_files/');"
+			f"attach 'ducklake:sqlite:{db_path}/{db_name}_catalog.sqlite' as {db_name} (data_path '{db_path}/{db_name}_files/', data_inlining_row_limit 0);"
 		)
 	ducklake.sql(f"use {db_name};")
 	return ducklake
