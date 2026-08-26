@@ -205,6 +205,8 @@ def sync_data_to_duckdb(docname: str):
 		name = unsynced[0]["name"]
 		duck_tb = DuckDBTable(dt)
 
+		binlog_pos = frappe.db.sql("select @@gtid_binlog_pos;", pluck=True)[0]
+
 		timeout = frappe.db.get_single_value("System Settings", "sync_timeout") or 25 * 60
 		sync_in_batch = frappe.db.get_single_value("System Settings", "sync_in_batch")
 		conn = frappe.get_doc("DuckDB Sync", docname).get_duckdb_conn()
@@ -214,7 +216,7 @@ def sync_data_to_duckdb(docname: str):
 		else:
 			sync_using_extension(conn, dt, duck_tb)
 
-		# update flag
+		frappe.db.set_value("DuckDB Sync Item", name, "gtid_binlog_pos", binlog_pos)
 		frappe.db.set_value("DuckDB Sync Item", name, "synced", True)
 
 		# schedule next
