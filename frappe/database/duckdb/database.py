@@ -176,9 +176,38 @@ def start_duckdb_sync():
 		doc.submit()
 
 
+def _filter_row_values(columns, values: dict) -> dict:
+	"""Keep only the values whose column actually exists on the DuckDB table."""
+	return {k: v for k, v in values.items() if k in columns}
+
+
+def _upsert_duckdb_row(conn, table_name: str, values: dict):
+	"""Delete-then-insert so this is safe to replay (no PK/UNIQUE constraint exists on `name`)."""
+	if not values or "name" not in values:
+		return
+
+	conn.execute(f'delete from "{table_name}" where "name" = ?', [values["name"]])
+
+	columns = list(values.keys())
+	col_list = ", ".join(f'"{c}"' for c in columns)
+	placeholders = ", ".join(["?"] * len(columns))
+	conn.execute(
+		f'insert into "{table_name}" ({col_list}) values ({placeholders})',
+		list(values.values()),
+	)
+
+
+def _delete_duckdb_row(conn, table_name: str, values: dict):
+	if not values or "name" not in values:
+		return
+	conn.execute(f'delete from "{table_name}" where "name" = ?', [values["name"]])
+
+
 def cdc():
 	from pymysqlreplication import BinLogStreamReader
 	from pymysqlreplication.row_event import DeleteRowsEvent, TableMapEvent, UpdateRowsEvent, WriteRowsEvent
+
+	from frappe.database import get_ducklake
 
 	cs = {
 		"host": frappe.conf.db_host,
@@ -189,16 +218,33 @@ def cdc():
 
 	tables = frappe.db.get_all("DuckDB Sync Item", filters={"synced": 1}, fields="table, gtid_binlog_pos")
 
-	for x in tables:
-		stream = BinLogStreamReader(
-			connection_settings=cs,
-			server_id=3,
-			blocking=False,
-			is_mariadb=True,
-			auto_position=x.gtid_binlog_pos,
-			only_events=[UpdateRowsEvent, DeleteRowsEvent, TableMapEvent, WriteRowsEvent],
-			only_schemas=[frappe.conf.db_name],
-			only_tables=["tab" + x.table],
-		)
-		for event in stream:
-			event.dump()
+	conn = get_ducklake()
+	try:
+		for x in tables:
+			table_name = "tab" + x.table
+			columns = {row[0] for row in conn.sql(f'describe "{table_name}"')}
+
+			stream = BinLogStreamReader(
+				connection_settings=cs,
+				server_id=3,
+				blocking=False,
+				is_mariadb=True,
+				auto_position=x.gtid_binlog_pos,
+				slave_heartbeat=10,
+				only_events=[UpdateRowsEvent, DeleteRowsEvent, TableMapEvent, WriteRowsEvent],
+				only_schemas=[frappe.conf.db_name],
+				only_tables=[table_name],
+			)
+			for event in stream:
+				if isinstance(event, WriteRowsEvent):
+					for row in event.rows:
+						_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["values"]))
+				elif isinstance(event, UpdateRowsEvent):
+					for row in event.rows:
+						_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["after_values"]))
+				elif isinstance(event, DeleteRowsEvent):
+					for row in event.rows:
+						_delete_duckdb_row(conn, table_name, row["values"])
+				# TableMapEvent carries schema info only, no row data - nothing to write.
+	finally:
+		conn.close()
