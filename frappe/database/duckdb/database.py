@@ -174,3 +174,31 @@ def start_duckdb_sync():
 			}
 		).insert()
 		doc.submit()
+
+
+def cdc():
+	from pymysqlreplication import BinLogStreamReader
+	from pymysqlreplication.row_event import DeleteRowsEvent, TableMapEvent, UpdateRowsEvent, WriteRowsEvent
+
+	cs = {
+		"host": frappe.conf.db_host,
+		"port": frappe.conf.db_port,
+		"user": frappe.conf.db_user,
+		"passwd": frappe.conf.db_password,
+	}
+
+	tables = frappe.db.get_all("DuckDB Sync Item", filters={"synced": 1}, fields="table, gtid_binlog_pos")
+
+	for x in tables:
+		stream = BinLogStreamReader(
+			connection_settings=cs,
+			server_id=3,
+			blocking=False,
+			is_mariadb=True,
+			auto_position=x.gtid_binlog_pos,
+			only_events=[UpdateRowsEvent, DeleteRowsEvent, TableMapEvent, WriteRowsEvent],
+			only_schemas=[frappe.conf.db_name],
+			only_tables=["tab" + x.table],
+		)
+		for event in stream:
+			event.dump()
