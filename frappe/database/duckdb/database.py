@@ -203,7 +203,12 @@ def _delete_duckdb_row(conn, table_name: str, values: dict):
 	conn.execute(f'delete from "{table_name}" where "name" = ?', [values["name"]])
 
 
+class BinlogReconnectLimitExceeded(Exception):
+	pass
+
+
 def cdc():
+	import pymysql
 	from pymysqlreplication import BinLogStreamReader
 	from pymysqlreplication.row_event import DeleteRowsEvent, TableMapEvent, UpdateRowsEvent, WriteRowsEvent
 
@@ -216,6 +221,11 @@ def cdc():
 		"passwd": frappe.conf.db_password,
 	}
 
+	# `python-mysql-replication` retries a dropped stream connection immediately and
+	# indefinitely (no cap, no backoff), so a persistent connection failure otherwise
+	# floods the log forever instead of surfacing. Bound it ourselves.
+	MAX_RECONNECT_ATTEMPTS = 5
+
 	tables = frappe.db.get_all("DuckDB Sync Item", filters={"synced": 1}, fields="table, gtid_binlog_pos")
 
 	conn = get_ducklake()
@@ -223,6 +233,18 @@ def cdc():
 		for x in tables:
 			table_name = "tab" + x.table
 			columns = {row[0] for row in conn.sql(f'describe "{table_name}"')}
+
+			attempts = 0
+
+			def connect_with_reconnect_limit(**settings):
+				nonlocal attempts
+				attempts += 1
+				if attempts > MAX_RECONNECT_ATTEMPTS:
+					raise BinlogReconnectLimitExceeded(
+						f"Giving up on binlog stream for {table_name} after {MAX_RECONNECT_ATTEMPTS} "
+						"consecutive connection failures"
+					)
+				return pymysql.connect(**settings)
 
 			stream = BinLogStreamReader(
 				connection_settings=cs,
@@ -235,17 +257,25 @@ def cdc():
 				only_events=[UpdateRowsEvent, DeleteRowsEvent, TableMapEvent, WriteRowsEvent],
 				only_schemas=[frappe.conf.db_name],
 				only_tables=[table_name],
+				pymysql_wrapper=connect_with_reconnect_limit,
 			)
-			for event in stream:
-				if isinstance(event, WriteRowsEvent):
-					for row in event.rows:
-						_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["values"]))
-				elif isinstance(event, UpdateRowsEvent):
-					for row in event.rows:
-						_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["after_values"]))
-				elif isinstance(event, DeleteRowsEvent):
-					for row in event.rows:
-						_delete_duckdb_row(conn, table_name, row["values"])
-				# TableMapEvent carries schema info only, no row data - nothing to write.
+			try:
+				for event in stream:
+					if isinstance(event, WriteRowsEvent):
+						for row in event.rows:
+							_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["values"]))
+					elif isinstance(event, UpdateRowsEvent):
+						for row in event.rows:
+							_upsert_duckdb_row(
+								conn, table_name, _filter_row_values(columns, row["after_values"])
+							)
+					elif isinstance(event, DeleteRowsEvent):
+						for row in event.rows:
+							_delete_duckdb_row(conn, table_name, row["values"])
+					# TableMapEvent carries schema info only, no row data - nothing to write.
+			except BinlogReconnectLimitExceeded:
+				frappe.log_error(title="DuckDB CDC binlog reconnect limit exceeded", message=table_name)
+			finally:
+				stream.close()
 	finally:
 		conn.close()
