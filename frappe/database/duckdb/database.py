@@ -226,7 +226,9 @@ def cdc():
 	# floods the log forever instead of surfacing. Bound it ourselves.
 	MAX_RECONNECT_ATTEMPTS = 5
 
-	tables = frappe.db.get_all("DuckDB Sync Item", filters={"synced": 1}, fields="table, gtid_binlog_pos")
+	tables = frappe.db.get_all(
+		"DuckDB Sync Item", filters={"synced": 1}, fields="name, table, gtid_binlog_pos"
+	)
 
 	conn = get_ducklake()
 	try:
@@ -246,6 +248,7 @@ def cdc():
 					)
 				return pymysql.connect(**settings)
 
+			binlog_pos = frappe.db.sql("select @@gtid_binlog_pos;", pluck=True)[0]
 			stream = BinLogStreamReader(
 				connection_settings=cs,
 				server_id=3,
@@ -277,5 +280,6 @@ def cdc():
 				frappe.log_error(title="DuckDB CDC binlog reconnect limit exceeded", message=table_name)
 			finally:
 				stream.close()
+				frappe.db.set_value("DuckDB Sync Item", x.name, "gtid_binlog_pos", binlog_pos)
 	finally:
 		conn.close()
