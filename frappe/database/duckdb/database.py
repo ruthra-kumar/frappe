@@ -181,26 +181,64 @@ def _filter_row_values(columns, values: dict) -> dict:
 	return {k: v for k, v in values.items() if k in columns}
 
 
-def _upsert_duckdb_row(conn, table_name: str, values: dict):
-	"""Delete-then-insert so this is safe to replay (no PK/UNIQUE constraint exists on `name`)."""
-	if not values or "name" not in values:
+# Same batch size `sync_using_pyarrow` streams full-table resyncs in.
+CDC_BATCH_SIZE = 204800
+
+
+def _timedelta_to_time(td):
+	from datetime import time
+
+	total_seconds = int(td.total_seconds()) % 86400
+	hours, remainder = divmod(total_seconds, 3600)
+	minutes, seconds = divmod(remainder, 60)
+	return time(hours, minutes, seconds, td.microseconds)
+
+
+def _flush_cdc_batch(conn, table_name, schema, time_columns, batch: dict):
+	"""Apply one table's buffered CDC events in bulk.
+
+	Mirrors `sync_using_pyarrow`: a single delete for every row touched by the batch,
+	followed by zero-copy arrow inserts, instead of a delete+insert round trip per row.
+	`batch` maps row name -> new values for an upsert, or None for a delete; only the
+	last event seen for a given name in this batch is applied, which is safe because
+	CDC upserts are themselves delete-then-insert (idempotent, order only matters
+	across, not within, a coalesced batch).
+	"""
+	from datetime import timedelta
+	from decimal import Decimal
+
+	import pyarrow as pa
+
+	if not batch:
 		return
 
-	conn.execute(f'delete from "{table_name}" where "name" = ?', [values["name"]])
+	names = list(batch.keys())
+	placeholders = ", ".join(["?"] * len(names))
+	conn.execute(f'delete from "{table_name}" where "name" in ({placeholders})', names)
 
-	columns = list(values.keys())
-	col_list = ", ".join(f'"{c}"' for c in columns)
-	placeholders = ", ".join(["?"] * len(columns))
-	conn.execute(
-		f'insert into "{table_name}" ({col_list}) values ({placeholders})',
-		list(values.values()),
-	)
-
-
-def _delete_duckdb_row(conn, table_name: str, values: dict):
-	if not values or "name" not in values:
+	upserts = [values for values in batch.values() if values is not None]
+	if not upserts:
 		return
-	conn.execute(f'delete from "{table_name}" where "name" = ?', [values["name"]])
+
+	# Binlog rows carry MariaDB DECIMAL columns as `decimal.Decimal`, which pyarrow
+	# refuses to narrow to the float64 arrow type implicitly.
+	for row in upserts:
+		for col, value in row.items():
+			if isinstance(value, Decimal):
+				row[col] = float(value)
+			elif col in time_columns and isinstance(value, timedelta):
+				row[col] = _timedelta_to_time(value)
+
+	field_list = ", ".join(f'"{c}"' for c in schema.names)
+	for start in range(0, len(upserts), CDC_BATCH_SIZE):
+		chunk = upserts[start : start + CDC_BATCH_SIZE]
+		arrow_table = pa.Table.from_batches([pa.RecordBatch.from_pylist(chunk, schema=schema)])
+		conn.register("arrow_table", arrow_table)
+		conn.execute(
+			f'insert into "{table_name}" ({field_list}) select {field_list} from arrow_table;'
+		).fetchall()
+		conn.unregister("arrow_table")
+		del arrow_table
 
 
 class BinlogReconnectLimitExceeded(Exception):
@@ -208,6 +246,7 @@ class BinlogReconnectLimitExceeded(Exception):
 
 
 def cdc():
+	import pyarrow as pa
 	import pymysql
 	from pymysqlreplication import BinLogStreamReader
 	from pymysqlreplication.row_event import DeleteRowsEvent, TableMapEvent, UpdateRowsEvent, WriteRowsEvent
@@ -235,6 +274,16 @@ def cdc():
 		for x in tables:
 			table_name = "tab" + x.table
 			columns = {row[0] for row in conn.sql(f'describe "{table_name}"')}
+
+			duck_tb = DuckDBTable(x.table)
+			schema = pa.schema([f for f in duck_tb.get_arrow_schema() if f.name in columns])
+			time_columns = [
+				name
+				for name, dtype in zip(schema.names, schema.types, strict=False)
+				if pa.types.is_time(dtype)
+			]
+
+			batch: dict[str, dict | None] = {}
 
 			attempts = 0
 
@@ -266,20 +315,35 @@ def cdc():
 				for event in stream:
 					if isinstance(event, WriteRowsEvent):
 						for row in event.rows:
-							_upsert_duckdb_row(conn, table_name, _filter_row_values(columns, row["values"]))
+							values = _filter_row_values(columns, row["values"])
+							if values.get("name"):
+								batch[values["name"]] = values
 					elif isinstance(event, UpdateRowsEvent):
 						for row in event.rows:
-							_upsert_duckdb_row(
-								conn, table_name, _filter_row_values(columns, row["after_values"])
-							)
+							values = _filter_row_values(columns, row["after_values"])
+							if values.get("name"):
+								batch[values["name"]] = values
 					elif isinstance(event, DeleteRowsEvent):
 						for row in event.rows:
-							_delete_duckdb_row(conn, table_name, row["values"])
+							if name := row["values"].get("name"):
+								batch[name] = None
 					# TableMapEvent carries schema info only, no row data - nothing to write.
+
+					if len(batch) >= CDC_BATCH_SIZE:
+						_flush_cdc_batch(conn, table_name, schema, time_columns, batch)
+						batch.clear()
 			except BinlogReconnectLimitExceeded:
 				frappe.log_error(title="DuckDB CDC binlog reconnect limit exceeded", message=table_name)
 			finally:
+				_flush_cdc_batch(conn, table_name, schema, time_columns, batch)
 				stream.close()
 				frappe.db.set_value("DuckDB Sync Item", x.name, "gtid_binlog_pos", binlog_pos)
 	finally:
 		conn.close()
+
+
+def count_gle():
+	from frappe.database import get_ducklake
+
+	d = get_ducklake()
+	print(d.sql('select count(*) from "tabGL Entry";'))
