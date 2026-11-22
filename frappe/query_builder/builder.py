@@ -5,7 +5,7 @@ from copy import copy
 
 from pypika import MySQLQuery, Order, PostgreSQLQuery, SQLLiteQuery, terms
 from pypika.dialects import MySQLQueryBuilder, PostgreSQLQueryBuilder, SQLLiteQueryBuilder
-from pypika.queries import QueryBuilder, Schema, Table
+from pypika.queries import JoinOn, QueryBuilder, Schema, Table
 from pypika.terms import Criterion, EmptyCriterion, Field, Function, Term
 from pypika.utils import QueryException, builder
 
@@ -214,9 +214,22 @@ class RecursiveSQLLiteQueryBuilder(RecursiveCTEMixin, SQLLiteQueryBuilder):
 			query += f" WHERE {where}"
 		return query
 
+	def _update_from_sql_builder(self) -> "RecursiveSQLLiteQueryBuilder":
+		"""SQLite has no `UPDATE ... JOIN` clause; move each joined table into FROM and its
+		ON criterion into WHERE, as SQLite's `UPDATE ... FROM` (3.33+) expects."""
+		builder = copy(self)
+		for join in builder._joins:
+			if not isinstance(join, JoinOn):
+				raise QueryException("SQLite UPDATE only supports joins with an ON criterion")
+			builder._from.append(join.item)
+			builder._wheres = join.criterion if builder._wheres is None else builder._wheres & join.criterion
+		builder._joins = []
+		return builder
+
 	def get_sql(self, with_alias: bool = False, subquery: bool = False, **kwargs) -> str:
 		self._set_kwargs_defaults(kwargs)
-		query = super().get_sql(with_alias, subquery, **kwargs)
+		builder = self._update_from_sql_builder() if self._update_table and self._joins else self
+		query = QueryBuilder.get_sql(builder, with_alias, subquery, **kwargs)
 		return query + self._on_conflict_sql(**kwargs) + self._on_conflict_action_sql(**kwargs)
 
 

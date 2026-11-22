@@ -1124,6 +1124,38 @@ class TestBuilderSQLite(IntegrationTestCase, TestBuilderBase):
 			("row", "new order"),
 		)
 
+	def test_update_with_join_uses_sqlite_update_from(self):
+		table = frappe.qb.Table(self.table_name)
+		source_table = f"{self.table_name}_source"
+		frappe.db.sql_ddl(f'DROP TABLE IF EXISTS "{source_table}"')
+		frappe.db.sql_ddl(
+			f'CREATE TABLE "{source_table}" ("identity" TEXT PRIMARY KEY, "mutable" TEXT NOT NULL)'
+		)
+		self.addCleanup(frappe.db.sql_ddl, f'DROP TABLE IF EXISTS "{source_table}"')
+		source = frappe.qb.Table(source_table)
+
+		frappe.qb.into(table).columns(table.identity, table.mutable, table.immutable).insert(
+			"row", "old", "preserved"
+		).run()
+		frappe.qb.into(source).columns(source.identity, source.mutable).insert("row", "new").run()
+
+		query = (
+			frappe.qb.update(table)
+			.left_join(source)
+			.on(table.identity == source.identity)
+			.set(table.mutable, source.mutable)
+		)
+
+		sql = query.get_sql()
+		self.assertIn(" FROM ", sql)
+		self.assertNotIn("JOIN", sql)
+		query.run()
+
+		self.assertEqual(
+			frappe.db.get_value(self.table_name, {"identity": "row"}, ["mutable", "immutable"]),
+			("new", "preserved"),
+		)
+
 
 class TestMisc(IntegrationTestCase):
 	def test_custom_func(self):
