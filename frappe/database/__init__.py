@@ -21,6 +21,10 @@ def setup_database(force, verbose=None, mariadb_user_host_login_scope=None):
 		import frappe.database.sqlite.setup_db
 
 		return frappe.database.sqlite.setup_db.setup_database(force, verbose)
+	elif frappe.conf.db_type == "turso":
+		import frappe.database.turso.setup_db
+
+		return frappe.database.turso.setup_db.setup_database(force, verbose)
 	else:
 		import frappe.database.postgres.setup_db
 
@@ -38,6 +42,10 @@ def bootstrap_database(verbose=None, source_sql=None):
 		import frappe.database.sqlite.setup_db
 
 		return frappe.database.sqlite.setup_db.bootstrap_database(verbose, source_sql)
+	elif frappe.conf.db_type == "turso":
+		import frappe.database.turso.setup_db
+
+		return frappe.database.turso.setup_db.bootstrap_database(verbose, source_sql)
 	else:
 		import frappe.database.postgres.setup_db
 
@@ -55,6 +63,10 @@ def drop_user_and_database(db_name, db_user):
 		import frappe.database.sqlite.setup_db
 
 		return frappe.database.sqlite.setup_db.drop_database(db_name)
+	elif frappe.conf.db_type == "turso":
+		import frappe.database.turso.setup_db
+
+		return frappe.database.turso.setup_db.drop_database(db_name)
 	else:
 		import frappe.database.postgres.setup_db
 
@@ -76,6 +88,10 @@ def get_db(socket=None, host=None, user=None, password=None, port=None, cur_db_n
 		import frappe.database.sqlite.database
 
 		return frappe.database.sqlite.database.SQLiteDatabase(cur_db_name=cur_db_name)
+	elif conf.db_type == "turso":
+		import frappe.database.turso.database
+
+		return frappe.database.turso.database.TursoDatabase(cur_db_name=cur_db_name)
 	else:
 		import frappe.database.mariadb.database
 

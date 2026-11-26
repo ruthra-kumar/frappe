@@ -23,7 +23,7 @@ from frappe.utils.bench_helper import CliCtxObj
 @click.option(
 	"--db-type",
 	default="mariadb",
-	type=click.Choice(["mariadb", "postgres", "sqlite"]),
+	type=click.Choice(["mariadb", "postgres", "sqlite", "turso"]),
 	help='Optional "sqlite", "postgres" or "mariadb". Default is "mariadb"',
 )
 @click.option("--db-host", help="Database Host")
@@ -99,6 +99,7 @@ def new_site(
 	db_labels = {
 		"postgres": "PostgreSQL",
 		"sqlite": "SQLite",
+		"turso": "Turso",
 	}
 	if db_type in db_labels:
 		click.secho(

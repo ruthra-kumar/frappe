@@ -789,7 +789,7 @@ def make_site_config(
 			if db_type:
 				site_config["db_type"] = db_type
 
-			if db_type == "sqlite":
+			if db_type in ["sqlite", "turso"]:
 				site_config["db_name"] = db_name
 
 			else:

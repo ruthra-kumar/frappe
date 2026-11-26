@@ -23,7 +23,7 @@ from frappe.query_builder.terms import (
 
 # Frappe's public query-builder helpers are installed on Base below. This is the
 # existing framework extension mechanism rather than an app overriding Frappe.
-from .builder import Base, MariaDB, Postgres, SQLite  # nosemgrep: frappe-monkey-patching-not-allowed
+from .builder import Base, MariaDB, Postgres, SQLite, Turso  # nosemgrep: frappe-monkey-patching-not-allowed
 
 
 class PseudoColumnMapper(PseudoColumn):
@@ -44,12 +44,14 @@ class db_type_is(Enum):
 	MARIADB = "mariadb"
 	POSTGRES = "postgres"
 	SQLITE = "sqlite"
+	TURSO = "turso"
 
 
 DB_TYPE_MAP = {
 	db_type_is.MARIADB: MariaDB,
 	db_type_is.POSTGRES: Postgres,
 	db_type_is.SQLITE: SQLite,
+	db_type_is.TURSO: Turso,
 }
 
 assert set(DB_TYPE_MAP) == set(db_type_is), "DB_TYPE_MAP must map every db_type_is member to a builder"

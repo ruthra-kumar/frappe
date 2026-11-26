@@ -287,3 +287,7 @@ class SQLite(Base, SQLLiteQuery):
 		if isinstance(table, str):
 			table = cls.DocType(table)
 		return super().from_(table, *args, **kwargs)
+
+
+class Turso(SQLite):
+	"""Turso is SQLite-compatible; reuse the SQLite query builder."""
