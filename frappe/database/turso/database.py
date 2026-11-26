@@ -38,7 +38,7 @@ class TursoExceptionUtil(SQLiteExceptionUtil):
 
 	@staticmethod
 	def is_deadlocked(e) -> bool:
-		return isinstance(e, frappe.QueryDeadlockError)
+		return isinstance(e, frappe.QueryDeadlockError) or "Write-write conflict" in str(e)
 
 	@classmethod
 	def is_timedout(cls, e) -> bool:
@@ -68,9 +68,13 @@ class TursoDatabase(TursoExceptionUtil, SQLiteDatabase):
 	def create_connection(self, read_only: bool = False):
 		db_path = self.get_db_path()
 		db_path.parent.mkdir(parents=True, exist_ok=True)
-		# multiprocess_wal lets several processes (web, workers, console) open the same file;
-		# every process must pass it. Not combinable with MVCC (BEGIN CONCURRENT).
-		return turso.connect(str(db_path), experimental_features="index_method,multiprocess_wal")
+		conn = turso.connect(str(db_path), experimental_features="index_method")
+		# MVCC allows concurrent writers within this process only; other processes get a lock error.
+		cur = conn.cursor()
+		cur.execute("PRAGMA journal_mode='mvcc'")
+		if cur.fetchone()[0] != "mvcc":
+			raise RuntimeError(f"Could not enable MVCC journal mode for {db_path}")
+		return conn
 
 	def get_db_path(self) -> Path:
 		return Path(frappe.get_site_path()) / "db" / f"{self.cur_db_name}.db"
@@ -90,7 +94,7 @@ class TursoDatabase(TursoExceptionUtil, SQLiteDatabase):
 		# Same as the SQLite version, but catches turso's exception type and never opens a
 		# separate read-only connection (pyturso has no mode=ro URI support).
 		try:
-			self.sql("BEGIN")
+			self.sql("BEGIN CONCURRENT")
 		except turso.OperationalError as e:
 			if not self.is_nested_transaction_error(e):
 				raise
