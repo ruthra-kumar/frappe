@@ -94,7 +94,7 @@ class TursoDatabase(TursoExceptionUtil, SQLiteDatabase):
 		# Same as the SQLite version, but catches turso's exception type and never opens a
 		# separate read-only connection (pyturso has no mode=ro URI support).
 		try:
-			self.sql("BEGIN")
+			self.sql("BEGIN CONCURRENT")
 		except turso.OperationalError as e:
 			if not self.is_nested_transaction_error(e):
 				raise
